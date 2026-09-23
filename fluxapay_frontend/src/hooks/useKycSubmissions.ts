@@ -2,6 +2,8 @@
 
 import useSWR from "swr";
 import { api } from "@/lib/api";
+import type { Result } from "@/lib/api";
+import { ApiError } from "@/lib/errors";
 
 /** Normalized shape for admin KYC list and detail (matches KycApplication where possible). */
 export interface KycApplicationShape {
@@ -29,6 +31,13 @@ interface BackendSubmission {
   business_address?: string;
   business_type?: string;
   director_full_name?: string;
+}
+
+/** UI filter status → backend KYCStatus enum */
+function mapStatusToBackend(status?: string): string | undefined {
+  if (!status || status === "all") return undefined;
+  if (status === "pending") return "pending_review";
+  return status;
 }
 
 function mapStatus(s: string): KycApplicationShape["status"] {
@@ -76,15 +85,32 @@ interface UseKycSubmissionsParams {
   limit?: number;
 }
 
+function unwrapResult<T>(result: Result<T>): T {
+  if ("error" in result && result.error) {
+    throw result.error instanceof ApiError
+      ? result.error
+      : new ApiError(500, String(result.error));
+  }
+  return (result as { data: T }).data;
+}
+
 export function useKycSubmissions(params: UseKycSubmissionsParams = {}) {
+  const backendParams = {
+    ...params,
+    status: mapStatusToBackend(params.status),
+  };
+
   const key =
     params.status || params.page != null || params.limit != null
-      ? ["kyc-submissions", params]
+      ? ["kyc-submissions", backendParams]
       : "kyc-submissions";
 
   const { data, error, isLoading, mutate } = useSWR<KycSubmissionsResponse>(
     key,
-    () => api.kyc.admin.getSubmissions(params) as Promise<KycSubmissionsResponse>
+    async () => {
+      const result = await api.kyc.admin.getSubmissions(backendParams);
+      return unwrapResult(result as Result<KycSubmissionsResponse>);
+    }
   );
 
   const applications: KycApplicationShape[] = (data?.submissions ?? []).map(mapSubmission);
@@ -101,7 +127,12 @@ export function useKycSubmissions(params: UseKycSubmissionsParams = {}) {
 export function useKycDetails(merchantId: string | null) {
   const { data, error, isLoading, mutate } = useSWR(
     merchantId ? ["kyc-details", merchantId] : null,
-    () => api.kyc.admin.getByMerchantId(merchantId!)
+    async () => {
+      const result = await api.kyc.admin.getByMerchantId(merchantId!);
+      return unwrapResult(
+        result as Result<{ kyc: BackendSubmission & { merchant?: BackendSubmission["merchant"] } }>
+      );
+    }
   );
   const application: KycApplicationShape | null = data?.kyc
     ? mapSubmission({
