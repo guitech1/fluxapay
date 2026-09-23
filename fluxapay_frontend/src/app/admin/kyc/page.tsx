@@ -113,10 +113,14 @@ const AdminKycPage = () => {
     rejection_reason?: string,
   ) => {
     try {
-      await api.kyc.admin.updateStatus(merchantId, {
+      const result = await api.kyc.admin.updateStatus(merchantId, {
         status: newStatus,
         rejection_reason,
       });
+      if ("error" in result && result.error) {
+        toastApiError(result.error);
+        return;
+      }
       toast.success(`Application ${newStatus} successfully`);
       setSelectedMerchantId(null);
       setShowRejectModal(false);
@@ -144,15 +148,28 @@ const AdminKycPage = () => {
     const merchantIds = Array.from(selectedRows);
     if (merchantIds.length === 0) return { succeeded: 0, failed: [] };
     try {
-      const results = await Promise.allSettled(
-        merchantIds.map((id) => api.kyc.admin.updateStatus(id, { status: "approved" }))
+      const results = await Promise.all(
+        merchantIds.map((id) =>
+          api.kyc.admin.updateStatus(id, { status: "approved" }),
+        ),
       );
-      const succeeded = results.filter((r) => r.status === "fulfilled").length;
-      const failed = results
-        .map((r, idx) => (r.status === "rejected" ? { id: merchantIds[idx], error: "Failed to approve" } : null))
-        .filter(Boolean) as { id: string; error?: string }[];
+      const failed: { id: string; error?: string }[] = [];
+      let succeeded = 0;
+      results.forEach((result, idx) => {
+        if ("error" in result && result.error) {
+          failed.push({
+            id: merchantIds[idx],
+            error: result.error.message || "Failed to approve",
+          });
+        } else {
+          succeeded += 1;
+        }
+      });
       if (succeeded > 0) {
         toast.success(`${succeeded} applications approved`);
+      }
+      if (failed.length > 0) {
+        toastApiError(new Error(`${failed.length} failed to approve`));
       }
       setSelectedRows(new Set());
       setShowBulkApproveModal(false);
@@ -160,7 +177,10 @@ const AdminKycPage = () => {
       return { succeeded, failed };
     } catch (err) {
       toastApiError(err);
-      return { succeeded: 0, failed: merchantIds.map((id) => ({ id, error: "Failed" })) };
+      return {
+        succeeded: 0,
+        failed: merchantIds.map((id) => ({ id, error: "Failed" })),
+      };
     }
   };
 
@@ -168,7 +188,17 @@ const AdminKycPage = () => {
     const merchantIds = Array.from(selectedRows);
     if (merchantIds.length === 0) return { succeeded: 0, failed: [] };
     try {
-      await api.kyc.admin.bulkReject(merchantIds, reason, notes);
+      const result = await api.kyc.admin.bulkReject(merchantIds, reason, notes);
+      if ("error" in result && result.error) {
+        toastApiError(result.error);
+        return {
+          succeeded: 0,
+          failed: merchantIds.map((id) => ({
+            id,
+            error: result.error.message || "Failed",
+          })),
+        };
+      }
       toast.success(`${merchantIds.length} applications rejected`);
       setSelectedRows(new Set());
       setShowBulkRejectModal(false);
@@ -176,7 +206,10 @@ const AdminKycPage = () => {
       return { succeeded: merchantIds.length, failed: [] };
     } catch (err) {
       toastApiError(err);
-      return { succeeded: 0, failed: merchantIds.map(id => ({ id, error: "Failed" })) };
+      return {
+        succeeded: 0,
+        failed: merchantIds.map((id) => ({ id, error: "Failed" })),
+      };
     }
   };
 
@@ -184,7 +217,17 @@ const AdminKycPage = () => {
     const merchantIds = Array.from(selectedRows);
     if (merchantIds.length === 0) return { succeeded: 0, failed: [] };
     try {
-      await api.kyc.admin.bulkRequestInfo(merchantIds, message);
+      const result = await api.kyc.admin.bulkRequestInfo(merchantIds, message);
+      if ("error" in result && result.error) {
+        toastApiError(result.error);
+        return {
+          succeeded: 0,
+          failed: merchantIds.map((id) => ({
+            id,
+            error: result.error.message || "Failed",
+          })),
+        };
+      }
       toast.success(`Requested info from ${merchantIds.length} merchants`);
       setSelectedRows(new Set());
       setShowBulkRequestInfoModal(false);
@@ -192,7 +235,10 @@ const AdminKycPage = () => {
       return { succeeded: merchantIds.length, failed: [] };
     } catch (err) {
       toastApiError(err);
-      return { succeeded: 0, failed: merchantIds.map(id => ({ id, error: "Failed" })) };
+      return {
+        succeeded: 0,
+        failed: merchantIds.map((id) => ({ id, error: "Failed" })),
+      };
     }
   };
 
@@ -210,7 +256,7 @@ const AdminKycPage = () => {
     if (selectedRows.size === filteredApplications.length) {
       setSelectedRows(new Set());
     } else {
-      setSelectedRows(new Set(filteredApplications.map(a => a.merchantId)));
+      setSelectedRows(new Set(filteredApplications.map((a) => a.merchantId)));
     }
   };
 
@@ -243,7 +289,6 @@ const AdminKycPage = () => {
 
   return (
     <div className="min-h-screen bg-slate-50">
-      {/* Header */}
       <div className="bg-white border-b border-slate-200">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
           <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4">
@@ -260,7 +305,6 @@ const AdminKycPage = () => {
       </div>
 
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-6">
-        {/* Stats Overview */}
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-4 mb-6">
           <div className="bg-white p-5 rounded-xl border border-slate-200 shadow-sm">
             <div className="flex items-center justify-between">
@@ -320,7 +364,6 @@ const AdminKycPage = () => {
           </div>
         </div>
 
-        {/* Filters */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm p-5 mb-6">
           <div className="flex flex-col lg:flex-row lg:items-center justify-between gap-4">
             <div className="flex-1">
@@ -354,14 +397,15 @@ const AdminKycPage = () => {
           </div>
         </div>
 
-        {/* Bulk Actions Bar */}
         {selectedRows.size > 0 && (
           <div className="bg-blue-50 border border-blue-200 rounded-xl p-4 mb-6 flex items-center justify-between">
             <span className="text-sm font-medium text-slate-900">
-              {selectedRows.size} application{selectedRows.size !== 1 ? "s" : ""} selected
+              {selectedRows.size} application
+              {selectedRows.size !== 1 ? "s" : ""} selected
             </span>
             <div className="flex items-center gap-2">
               <button
+                type="button"
                 onClick={() => setShowBulkApproveModal(true)}
                 className="px-3 py-1.5 text-sm font-medium text-emerald-700 bg-white border border-emerald-200 rounded-lg hover:bg-emerald-50 transition-colors flex items-center gap-2"
               >
@@ -369,6 +413,7 @@ const AdminKycPage = () => {
                 Approve
               </button>
               <button
+                type="button"
                 onClick={() => setShowBulkRequestInfoModal(true)}
                 className="px-3 py-1.5 text-sm font-medium text-blue-700 bg-white border border-blue-200 rounded-lg hover:bg-blue-50 transition-colors flex items-center gap-2"
               >
@@ -376,6 +421,7 @@ const AdminKycPage = () => {
                 Request Info
               </button>
               <button
+                type="button"
                 onClick={() => setShowBulkRejectModal(true)}
                 className="px-3 py-1.5 text-sm font-medium text-rose-700 bg-white border border-rose-200 rounded-lg hover:bg-rose-50 transition-colors flex items-center gap-2"
               >
@@ -386,7 +432,6 @@ const AdminKycPage = () => {
           </div>
         )}
 
-        {/* Table */}
         <div className="bg-white rounded-xl border border-slate-200 shadow-sm overflow-hidden">
           <div className="overflow-x-auto">
             <table className="min-w-full divide-y divide-slate-200">
@@ -395,7 +440,10 @@ const AdminKycPage = () => {
                   <th className="px-6 py-4 text-left text-xs font-semibold text-slate-700 uppercase tracking-wider w-8">
                     <input
                       type="checkbox"
-                      checked={selectedRows.size === filteredApplications.length && filteredApplications.length > 0}
+                      checked={
+                        selectedRows.size === filteredApplications.length &&
+                        filteredApplications.length > 0
+                      }
                       onChange={toggleSelectAll}
                       className="rounded border-slate-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                     />
@@ -420,7 +468,7 @@ const AdminKycPage = () => {
               <tbody className="divide-y divide-slate-200">
                 {filteredApplications.length === 0 ? (
                   <EmptyState
-                    colSpan={5}
+                    colSpan={6}
                     className="py-12"
                     message="No applications found. No KYC applications match your search criteria."
                   />
@@ -431,7 +479,9 @@ const AdminKycPage = () => {
                     return (
                       <tr
                         key={app.id}
-                        className={`hover:bg-slate-50/50 transition-colors ${isSelected ? 'bg-blue-50' : ''}`}
+                        className={`hover:bg-slate-50/50 transition-colors ${
+                          isSelected ? "bg-blue-50" : ""
+                        }`}
                       >
                         <td className="px-6 py-4 whitespace-nowrap">
                           <input
@@ -464,33 +514,28 @@ const AdminKycPage = () => {
                             </div>
                           </div>
                         </td>
-                        <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2 text-sm text-slate-600">
-                            <Calendar className="w-4 h-4 text-slate-400" />
-                            {app.submittedDate}
-                          </div>
+                        <td className="px-6 py-4 whitespace-nowrap text-sm text-slate-600">
+                          {app.submittedDate}
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
                           <span
-                            className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-full text-xs font-medium ${statusConfig.bg} ${statusConfig.color} ${statusConfig.border}`}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium border ${
+                              statusConfig.bg
+                            } ${statusConfig.color} ${statusConfig.border}`}
                           >
                             {statusConfig.icon}
                             {statusConfig.label}
                           </span>
                         </td>
                         <td className="px-6 py-4 whitespace-nowrap">
-                          <div className="flex items-center gap-2">
-                            <button
-                              onClick={() =>
-                                setSelectedMerchantId(app.merchantId)
-                              }
-                              className="px-3 py-1.5 text-sm font-medium text-white rounded-lg transition-colors hover:opacity-90 flex items-center gap-2"
-                              style={{ backgroundColor: primaryColor }}
-                            >
-                              <Eye className="w-4 h-4" />
-                              Review
-                            </button>
-                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setSelectedMerchantId(app.merchantId)}
+                            className="inline-flex items-center gap-1.5 text-sm font-medium text-slate-700 hover:text-slate-900"
+                          >
+                            <Eye className="w-4 h-4" />
+                            Review
+                          </button>
                         </td>
                       </tr>
                     );
@@ -502,293 +547,120 @@ const AdminKycPage = () => {
         </div>
       </div>
 
-      {/* Bulk Approve Modal */}
-      {showBulkApproveModal && (
-        <BulkApproveModal
-          count={selectedRows.size}
-          onConfirm={handleBulkApprove}
-          onClose={() => setShowBulkApproveModal(false)}
-        />
-      )}
-
-      {/* Bulk Reject Modal */}
-      {showBulkRejectModal && (
-        <BulkRejectModal
-          count={selectedRows.size}
-          onConfirm={handleBulkReject}
-          onClose={() => setShowBulkRejectModal(false)}
-        />
-      )}
-
-      {/* Bulk Request Info Modal */}
-      {showBulkRequestInfoModal && (
-        <BulkRequestInfoModal
-          count={selectedRows.size}
-          onConfirm={handleBulkRequestInfo}
-          onClose={() => setShowBulkRequestInfoModal(false)}
-        />
-      )}
-
-      {/* Application Detail Modal */}
       {selectedApplication && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50 overflow-y-auto">
-          <div className="bg-white rounded-2xl max-w-3xl w-full my-8 flex flex-col relative">
-            {/* Close Button */}
-            <button
-              onClick={() => {
-                setSelectedMerchantId(null);
-                setShowRejectModal(false);
-              }}
-              className="absolute top-4 right-4 p-2 hover:bg-slate-100 rounded-full transition-colors z-10"
-            >
-              <X className="w-5 h-5 text-slate-500" />
-            </button>
-
-            <div className="p-6 border-b border-slate-200">
-              <div className="flex items-center gap-4">
-                <div
-                  className="w-12 h-12 rounded-xl flex items-center justify-center"
-                  style={{ backgroundColor: primaryLight }}
-                >
-                  <BuildingIcon
-                    className="w-6 h-6"
-                    style={{ color: primaryColor }}
-                  />
-                </div>
-                <div>
-                  <h2 className="text-xl font-bold text-slate-900">
-                    {selectedApplication.merchantName}
-                  </h2>
-                  <div className="flex items-center gap-2 mt-1">
-                    <span className="text-sm text-slate-500 font-mono">
-                      {selectedApplication.id}
-                    </span>
-                    <span className="text-slate-300">•</span>
-                    <span className="text-sm text-slate-500">
-                      {selectedApplication.email}
-                    </span>
-                  </div>
-                </div>
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-2xl w-full max-h-[90vh] overflow-y-auto">
+            <div className="flex items-center justify-between border-b border-slate-200 px-6 py-4">
+              <h2 className="text-lg font-semibold text-slate-900">
+                Review application
+              </h2>
+              <button
+                type="button"
+                onClick={() => setSelectedMerchantId(null)}
+                className="text-slate-400 hover:text-slate-600"
+              >
+                <X className="w-5 h-5" />
+              </button>
+            </div>
+            <div className="px-6 py-4 space-y-4">
+              <div>
+                <p className="text-sm text-slate-500">Merchant</p>
+                <p className="font-medium text-slate-900">
+                  {selectedApplication.merchantName}
+                </p>
+                <p className="text-sm text-slate-600">{selectedApplication.email}</p>
               </div>
-            </div>
-
-            <div className="p-6 space-y-8">
-              {/* Business Information */}
-              <section>
-                <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-                  Business Details
-                </h3>
-                <div className="bg-slate-50 rounded-xl p-5 grid grid-cols-1 md:grid-cols-2 gap-6">
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">
-                      Registration Number
-                    </p>
-                    <p className="text-sm font-medium text-slate-900">
-                      {selectedApplication.businessInfo.registrationNumber}
-                    </p>
-                  </div>
-                  <div>
-                    <p className="text-xs text-slate-500 mb-1">Entity Type</p>
-                    <p className="text-sm font-medium text-slate-900">
-                      {selectedApplication.businessInfo.type}
-                    </p>
-                  </div>
-                  <div className="md:col-span-2">
-                    <p className="text-xs text-slate-500 mb-1">
-                      Business Address
-                    </p>
-                    <p className="text-sm font-medium text-slate-900">
-                      {selectedApplication.businessInfo.address}
-                    </p>
-                  </div>
-                </div>
-              </section>
-
-              {/* Beneficial Owners */}
-              <section>
-                <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-                  Beneficial Owners
-                </h3>
-                <div className="border border-slate-200 rounded-xl overflow-hidden">
-                  <table className="min-w-full divide-y divide-slate-200">
-                    <thead className="bg-slate-50">
-                      <tr>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">
-                          Name
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">
-                          Role
-                        </th>
-                        <th className="px-4 py-3 text-left text-xs font-medium text-slate-500 uppercase">
-                          Ownership
-                        </th>
-                      </tr>
-                    </thead>
-                    <tbody className="divide-y divide-slate-200 bg-white">
-                      {selectedApplication.beneficialOwners.length === 0 ? (
-                        <EmptyState
-                          colSpan={3}
-                          className="px-4 py-8 text-sm text-slate-500"
-                          message="No beneficial owners provided."
-                        />
-                      ) : (
-                        selectedApplication.beneficialOwners.map(
-                          (owner, idx) => (
-                            <tr key={idx}>
-                              <td className="px-4 py-3 text-sm text-slate-900">
-                                {owner.name}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-slate-600">
-                                {owner.role}
-                              </td>
-                              <td className="px-4 py-3 text-sm text-slate-900">
-                                {owner.ownership}%
-                              </td>
-                            </tr>
-                          ),
-                        )
-                      )}
-                    </tbody>
-                  </table>
-                </div>
-              </section>
-
-              {/* Documents */}
-              <section>
-                <h3 className="text-sm font-semibold text-slate-900 uppercase tracking-wider mb-4">
-                  Submitted Documents
-                </h3>
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                  {selectedApplication.documents.map((doc, idx) => (
-                    <div
-                      key={idx}
-                      className="flex items-center justify-between p-4 border border-slate-200 rounded-xl hover:border-slate-300 transition-colors bg-white"
-                    >
-                      <div className="flex items-center gap-3">
-                        <div className="w-10 h-10 rounded-lg bg-indigo-50 flex items-center justify-center">
-                          <FileText className="w-5 h-5 text-indigo-600" />
-                        </div>
-                        <div>
-                          <p className="text-sm font-medium text-slate-900">
-                            {doc.type}
-                          </p>
-                          <p className="text-xs text-slate-500">{doc.name}</p>
-                        </div>
-                      </div>
-                      <button className="text-sm text-indigo-600 font-medium hover:text-indigo-700">
-                        View
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </div>
-
-            {/* Actions Footer */}
-            <div className="p-6 border-t border-slate-200 bg-slate-50 rounded-b-2xl">
-              {showRejectModal ? (
-                <div className="space-y-4">
-                  <p className="text-sm font-medium text-slate-900">
-                    Reason for Rejection
-                  </p>
-                  <textarea
-                    className="w-full p-3 border border-slate-300 rounded-lg focus:ring-2 focus:ring-rose-500 focus:border-transparent text-sm"
-                    rows={3}
-                    placeholder="Please explain why this application is being rejected..."
-                    value={rejectionReason}
-                    onChange={(e) => setRejectionReason(e.target.value)}
-                  ></textarea>
-                  <div className="flex justify-end gap-3">
-                    <button
-                      onClick={() => {
-                        setShowRejectModal(false);
-                        setRejectionReason("");
-                      }}
-                      className="px-4 py-2 text-sm font-medium text-slate-600 hover:text-slate-900"
-                    >
-                      Cancel
-                    </button>
-                    <button
-                      onClick={handleReject}
-                      className="px-4 py-2 text-sm font-medium text-white bg-rose-600 rounded-lg hover:bg-rose-700 transition-colors"
-                    >
-                      Confirm Rejection
-                    </button>
-                  </div>
-                </div>
-              ) : (
-                <div className="flex justify-end gap-3">
-                  <button
-                    onClick={() =>
-                      handleUpdateStatus(
-                        selectedApplication.id,
-                        "additional_info_required",
-                      )
-                    }
-                    className="px-4 py-2 text-sm font-medium text-slate-700 bg-white border border-slate-300 rounded-lg hover:bg-slate-50 transition-colors"
-                  >
-                    Request Info
-                  </button>
-                  <button
-                    onClick={() => setShowRejectModal(true)}
-                    className="px-4 py-2 text-sm font-medium text-rose-700 bg-white border border-rose-200 rounded-lg hover:bg-rose-50 transition-colors"
-                  >
-                    Reject
-                  </button>
-                  <button
-                    onClick={() =>
-                      handleUpdateStatus(
-                        selectedApplication.merchantId,
-                        "approved",
-                      )
-                    }
-                    className="px-6 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700 transition-colors shadow-sm"
-                  >
-                    Approve Application
-                  </button>
-                </div>
-              )}
+              <div className="flex flex-wrap gap-2">
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleUpdateStatus(
+                      selectedApplication.merchantId,
+                      "approved",
+                    )
+                  }
+                  className="px-4 py-2 text-sm font-medium text-white bg-emerald-600 rounded-lg hover:bg-emerald-700"
+                >
+                  Approve
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setShowRejectModal(true)}
+                  className="px-4 py-2 text-sm font-medium text-rose-700 bg-rose-50 border border-rose-200 rounded-lg hover:bg-rose-100"
+                >
+                  Reject
+                </button>
+                <button
+                  type="button"
+                  onClick={() =>
+                    void handleUpdateStatus(
+                      selectedApplication.merchantId,
+                      "additional_info_required",
+                    )
+                  }
+                  className="px-4 py-2 text-sm font-medium text-blue-700 bg-blue-50 border border-blue-200 rounded-lg hover:bg-blue-100"
+                >
+                  Request info
+                </button>
+              </div>
             </div>
           </div>
         </div>
       )}
+
+      {showRejectModal && selectedApplication && (
+        <div className="fixed inset-0 z-[60] flex items-center justify-center bg-black/40 p-4">
+          <div className="bg-white rounded-xl shadow-xl max-w-md w-full p-6 space-y-4">
+            <h3 className="text-lg font-semibold text-slate-900">
+              Reject application
+            </h3>
+            <textarea
+              className="w-full border border-slate-300 rounded-lg p-3 text-sm"
+              rows={4}
+              placeholder="Rejection reason"
+              value={rejectionReason}
+              onChange={(e) => setRejectionReason(e.target.value)}
+            />
+            <div className="flex justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setShowRejectModal(false)}
+                className="px-3 py-2 text-sm text-slate-600"
+              >
+                Cancel
+              </button>
+              <button
+                type="button"
+                onClick={handleReject}
+                className="px-4 py-2 text-sm font-medium text-white bg-rose-600 rounded-lg"
+              >
+                Confirm reject
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      <BulkApproveModal
+        open={showBulkApproveModal}
+        onClose={() => setShowBulkApproveModal(false)}
+        onConfirm={handleBulkApprove}
+        count={selectedRows.size}
+      />
+      <BulkRejectModal
+        open={showBulkRejectModal}
+        onClose={() => setShowBulkRejectModal(false)}
+        onConfirm={handleBulkReject}
+        count={selectedRows.size}
+      />
+      <BulkRequestInfoModal
+        open={showBulkRequestInfoModal}
+        onClose={() => setShowBulkRequestInfoModal(false)}
+        onConfirm={handleBulkRequestInfo}
+        count={selectedRows.size}
+      />
     </div>
   );
 };
-
-// Helper component for the modal icon
-const BuildingIcon = ({
-  className,
-  style,
-}: {
-  className?: string;
-  style?: React.CSSProperties;
-}) => (
-  <svg
-    xmlns="http://www.w3.org/2000/svg"
-    width="24"
-    height="24"
-    viewBox="0 0 24 24"
-    fill="none"
-    stroke="currentColor"
-    strokeWidth="2"
-    strokeLinecap="round"
-    strokeLinejoin="round"
-    className={className}
-    style={style}
-  >
-    <rect width="16" height="20" x="4" y="2" rx="2" ry="2" />
-    <path d="M9 22v-4h6v4" />
-    <path d="M8 6h.01" />
-    <path d="M16 6h.01" />
-    <path d="M12 6h.01" />
-    <path d="M12 10h.01" />
-    <path d="M12 14h.01" />
-    <path d="M16 10h.01" />
-    <path d="M16 14h.01" />
-    <path d="M8 10h.01" />
-    <path d="M8 14h.01" />
-  </svg>
-);
 
 export default AdminKycPage;
